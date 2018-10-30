@@ -1,0 +1,148 @@
+# Configure the Azure provider
+provider "azurerm" { }
+
+resource "azurerm_resource_group" "CapIgniteRG" {
+    name = "CapIgnite-RG"
+    location = "westeurope"
+}
+
+resource "azurerm_resource_group" "CapIgniteSqlRG" {
+    name = "CapIgniteSql-RG"
+    location = "westeurope"
+}
+
+
+# Storage
+resource "azurerm_storage_account" "CapIgniteStorage" {
+	name                     = "capignitestoragetest"
+	resource_group_name      = "${azurerm_resource_group.CapIgniteRG.name}"
+	location                 = "${azurerm_resource_group.CapIgniteRG.location}"
+	account_tier             = "Standard"
+	account_replication_type = "LRS"
+}
+
+# Web
+resource "azurerm_app_service_plan" "CapIgniteAppServicePlan" {
+    name                = "CapIgniteAppServicePlan"
+    location            = "${azurerm_resource_group.CapIgniteRG.location}"
+    resource_group_name = "${azurerm_resource_group.CapIgniteRG.name}"
+    sku {
+        tier = "Standard"
+        size = "S1"
+    }
+}
+
+# Cosmos
+locals {
+  connectionString = "Server=tcp:capignitesqlserver.database.windows.net,1433;Initial Catalog=CapIgniteDbTest;Persist Security Info=False;User ID=DbAdmin;Password=Iyghwuieygt837UYgukygoiUY89727;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
+  blobString = "${azurerm_storage_account.CapIgniteStorage.primary_connection_string}"
+}
+
+resource "azurerm_app_service" "CapIgniteAppServiceWeb" {
+    name                = "CapIgniteAppServiceWeb"
+    location            = "${azurerm_resource_group.CapIgniteRG.location}"
+    resource_group_name = "${azurerm_resource_group.CapIgniteRG.name}"
+    app_service_plan_id = "${azurerm_app_service_plan.CapIgniteAppServicePlan.id}"
+	site_config {
+		always_on 		= true
+	}
+	connection_string {
+		name			= "DefaultConnection"	
+		type			= "SqlAzure"
+		value			= "${local.connectionString}"
+	}
+	app_settings {
+		"ASPNETCORE_ENVIRONMENT" 		= "Production"
+		"Test" 							= "${local.blobString}"
+	}
+}
+
+resource "azurerm_app_service_slot" "CapIgniteAppServiceWeb" {
+    name                = "CapIgniteAppServiceWeb-Test"
+    location            = "${azurerm_resource_group.CapIgniteRG.location}"
+    resource_group_name = "${azurerm_resource_group.CapIgniteRG.name}"
+    app_service_plan_id = "${azurerm_app_service_plan.CapIgniteAppServicePlan.id}"
+    app_service_name    = "${azurerm_app_service.CapIgniteAppServiceWeb.name}"
+	site_config {
+		always_on 		= true
+	}
+	connection_string {
+		name			= "DefaultConnection"	
+		type			= "SqlAzure"
+		value			= "${local.connectionString}"
+	}
+	app_settings {
+		"ASPNETCORE_ENVIRONMENT" 		= "Test"
+	}
+}
+
+# Functions App
+resource "azurerm_function_app" "CapIgniteFunctions" {
+  name                      = "CapIgniteFunctions"
+  location                  = "${azurerm_resource_group.CapIgniteRG.location}"
+  resource_group_name       = "${azurerm_resource_group.CapIgniteRG.name}"
+  app_service_plan_id       = "${azurerm_app_service_plan.CapIgniteAppServicePlan.id}"
+  storage_connection_string = "${local.blobString}"
+}
+
+# Database
+resource "azurerm_sql_server" "CapIgniteSql" {
+	name                         = "capignitesqlserver"
+	resource_group_name          = "${azurerm_resource_group.CapIgniteSqlRG.name}"
+	location                     = "${azurerm_resource_group.CapIgniteSqlRG.location}"
+	version                      = "12.0"
+	administrator_login          = "DbAdmin"
+	administrator_login_password = "Iyghwuieygt837UYgukygoiUY89727"
+
+	tags {
+		environment = "production"
+	}
+}
+
+resource "azurerm_sql_database" "CapIgniteSql" {
+	name                		= "CapIgniteDbTest"
+	resource_group_name 		= "${azurerm_resource_group.CapIgniteSqlRG.name}"
+	location                    = "${azurerm_resource_group.CapIgniteSqlRG.location}"
+	server_name 				= "${azurerm_sql_server.CapIgniteSql.name}"
+	edition 					= "Standard"
+	requested_service_objective_name = "S0"
+
+	tags {
+		environment = "production"
+	}
+}
+
+# Cosmos
+locals {
+  failLocation = "northeurope"
+}
+
+resource "azurerm_cosmosdb_account" "CapIgniteCosmos" {
+  name                = "cosmosdbignite"
+  location            = "${azurerm_resource_group.CapIgniteRG.location}"
+  resource_group_name = "${azurerm_resource_group.CapIgniteRG.name}"
+  offer_type          = "Standard"
+  kind                = "GlobalDocumentDB"
+
+  enable_automatic_failover = true
+
+  //set ip_range_filter to allow azure services (0.0.0.0) and azure portal.
+  ip_range_filter = "0.0.0.0,104.42.195.92,40.76.54.131,52.176.6.30,52.169.50.45,52.187.184.26,83.81.178.22"
+
+  consistency_policy {
+    consistency_level       = "BoundedStaleness"
+    max_interval_in_seconds = 10
+    max_staleness_prefix    = 200
+  }
+
+  geo_location {
+    prefix            = "cosmosdbignite"
+    location          = "${azurerm_resource_group.CapIgniteRG.location}"
+    failover_priority = 2
+  }
+
+  geo_location {
+    location          = "${local.failLocation}"
+    failover_priority = 0
+  }
+}

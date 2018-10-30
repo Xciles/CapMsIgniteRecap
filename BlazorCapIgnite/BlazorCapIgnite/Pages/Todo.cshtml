@@ -1,0 +1,32 @@
+﻿@using BlazorCapIgnite
+@page "/todo"
+
+<h1>Todo (@todos.Count(x => !x.IsDone))</h1>
+
+<ul>
+    @foreach (var todo in todos)
+    {
+        <li>
+            <input type="checkbox" bind="@todo.IsDone"/>
+            <input bind="@todo.Title"/>
+        </li>
+    }
+</ul>
+
+<input placeholder="Something!" bind="@newTodo" />
+<button onclick="@AddTodo">Add Todo</button>
+
+@functions
+{
+    IList<TodoItem> todos = new List<TodoItem>();
+    string newTodo;
+
+    void AddTodo()
+    {
+        if (!string.IsNullOrWhiteSpace(newTodo))
+        {
+            todos.Add(new TodoItem {Title = newTodo});
+            newTodo = "";
+        }
+    }
+}
